@@ -19,9 +19,14 @@ const config = {
   questionCsvPath:
     process.env.QUESTION_CSV_PATH || path.join(process.cwd(), 'knoi-smart-questions-2026-06-17.csv'),
   questionStartLine: Number(process.env.QUESTION_START_LINE || 14),
+  questionSource: process.env.KNOI_QUESTION_SOURCE || 'live',
   dryRun: false,
   imageOutputDir: process.env.IMAGE_OUTPUT_DIR || path.join(process.cwd(), 'knoi-smart-questions-images'),
   questionDelayMs: Number(process.env.QUESTION_DELAY_MS || 1500),
+  questionLoadTimeoutMs: Number(process.env.QUESTION_LOAD_TIMEOUT_MS || 15000),
+  answerWaitTimeoutMs: Number(process.env.KNOI_ANSWER_WAIT_TIMEOUT_MS || 300000),
+  keepAwake: String(process.env.KNOI_KEEP_AWAKE || '').toLowerCase() !== 'false',
+  resumeFromCheckpoint: String(process.env.KNOI_RESUME || '').toLowerCase() !== 'false',
   boardName: process.env.KNOI_BOARD || '',
   className: process.env.KNOI_CLASS || '',
   bookName: process.env.KNOI_BOOK || '',
@@ -47,9 +52,21 @@ config.className = args.class || config.className;
 config.bookName = args.book || config.bookName;
 config.questionCsvPath = args.questions || config.questionCsvPath;
 config.questionStartLine = Number(args['start-line'] || args.startLine || config.questionStartLine);
+config.questionSource = String(args.source || args.questionSource || config.questionSource || '')
+  .trim()
+  .toLowerCase();
+if (!config.questionSource || !['live', 'file'].includes(config.questionSource)) {
+  config.questionSource = config.questionCsvPath && args.questions ? 'file' : 'live';
+}
 config.dryRun = String(args['dry-run'] || args.dryRun || process.env.DRY_RUN || '').toLowerCase() === 'true'
   || String(args['dry-run'] || args.dryRun || process.env.DRY_RUN || '') === '1';
 config.imageOutputDir = args['image-dir'] || config.imageOutputDir;
+config.keepAwake = String(args['keep-awake'] ?? args.keepAwake ?? process.env.KNOI_KEEP_AWAKE ?? config.keepAwake).toLowerCase() !== 'false'
+  && String(args['keep-awake'] ?? args.keepAwake ?? process.env.KNOI_KEEP_AWAKE ?? config.keepAwake).toLowerCase() !== '0';
+config.resumeFromCheckpoint = String(args.resume ?? process.env.KNOI_RESUME ?? config.resumeFromCheckpoint).toLowerCase() !== 'false'
+  && String(args.resume ?? process.env.KNOI_RESUME ?? config.resumeFromCheckpoint).toLowerCase() !== '0';
+
+let keepAwakeProcess = null;
 
 function ensureAbsoluteUrl(baseUrl, maybePath) {
   if (!maybePath) return baseUrl;
@@ -62,6 +79,36 @@ function normalizeLabel(value) {
     .trim()
     .replace(/\s+/g, ' ')
     .toLowerCase();
+}
+
+function sanitizeFileStem(value, fallback = 'knoi-smart-questions') {
+  const cleaned = String(value || '')
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '');
+  return (cleaned || fallback).slice(0, 120);
+}
+
+function normalizeExploringLabel(value) {
+  return String(value || '')
+    .replace(/^exploring:\s*/i, '')
+    .replace(/_/g, '-')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Za-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Za-z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function toReadableFileStem(value, fallback = 'knoi-smart-questions') {
+  const normalized = normalizeExploringLabel(value)
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return sanitizeFileStem(normalized.toLowerCase(), fallback);
 }
 
 function labelCandidates(value) {
@@ -183,6 +230,94 @@ function resolveChromeExecutablePath() {
   ].filter(Boolean);
 
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || '';
+}
+
+function getCheckpointPath() {
+  return path.resolve(`${config.outputPrefix}.checkpoint.json`);
+}
+
+async function loadRunCheckpoint(checkpointPath) {
+  if (!fs.existsSync(checkpointPath)) {
+    return null;
+  }
+
+  try {
+    const raw = await fsPromises.readFile(checkpointPath, 'utf8');
+    return JSON.parse(raw);
+  } catch (error) {
+    console.log(`Ignoring unreadable checkpoint at ${checkpointPath}: ${error.message}`);
+    return null;
+  }
+}
+
+async function saveRunCheckpoint(checkpointPath, payload) {
+  const tempPath = `${checkpointPath}.tmp`;
+  await fsPromises.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+  await fsPromises.rename(tempPath, checkpointPath);
+}
+
+async function clearRunCheckpoint(checkpointPath) {
+  await fsPromises.unlink(checkpointPath).catch(() => {});
+}
+
+function isRecoverableSessionError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return [
+    'target closed',
+    'browser has been closed',
+    'page has been closed',
+    'session closed',
+    'browser disconnected',
+    'crashed',
+    'page closed',
+    'execution context was destroyed',
+    'navigation failed because page was closed',
+  ].some((needle) => message.includes(needle));
+}
+
+function isGenericUnavailableAnswer(text) {
+  const normalized = normalizeLabel(text);
+  return [
+    'this information is not available in the document.',
+    'this information is not available in the document',
+    'information is not available in the document',
+    'not available in the document',
+  ].some((phrase) => normalized.includes(phrase));
+}
+
+function startKeepAwake() {
+  if (!config.keepAwake || process.platform !== 'win32' || keepAwakeProcess) {
+    return;
+  }
+
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -Namespace Win32 -Name PowerState -MemberDefinition @'
+    [DllImport("kernel32.dll")]
+    public static extern uint SetThreadExecutionState(uint esFlags);
+'@
+$flags = 0x80000003
+while ($true) {
+  [Win32.PowerState]::SetThreadExecutionState($flags) | Out-Null
+  Start-Sleep -Seconds 30
+}
+`;
+
+  keepAwakeProcess = spawn(
+    'powershell',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command', script],
+    { stdio: 'ignore', windowsHide: true }
+  );
+  keepAwakeProcess.unref();
+}
+
+async function stopKeepAwake() {
+  if (!keepAwakeProcess) {
+    return;
+  }
+
+  keepAwakeProcess.kill();
+  keepAwakeProcess = null;
 }
 
 async function firstVisibleLocator(page, selectors) {
@@ -338,23 +473,212 @@ async function openDocumentAnalysis(page) {
 }
 
 async function openSmartQuestionPanel(page) {
+  const selectors = [
+    'button:has(.lucide-brain)',
+    'button:has(svg.lucide-brain)',
+    'button[aria-label*="Smart Questions" i]',
+    'button[title*="Smart Questions" i]',
+    '[data-testid*="smart" i]',
+  ];
+
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if (await locator.count().catch(() => 0)) {
+      if (await locator.isVisible().catch(() => false)) {
+        await locator.click({ force: true }).catch(async () => {
+          const handle = await locator.elementHandle();
+          if (!handle) throw new Error('Could not open Smart Questions panel');
+          await handle.evaluate((element) => {
+            const clickable = element.closest('button, a, [role="button"]') || element;
+            clickable.click();
+          });
+        });
+        await page.waitForTimeout(500);
+        return;
+      }
+    }
+  }
+
   await clickAny(
     page,
     [
       'text=Smart Questions',
       'text=Smart Question',
-      'text=Smart question',
-      'text=Smart Q',
-      'text=Questions',
       'button:has-text("Smart Questions")',
       'button:has-text("Smart Question")',
-      'a:has-text("Smart Questions")',
-      'a:has-text("Smart Question")',
-      '[data-testid*="smart"]',
-      '[aria-label*="smart" i]',
     ],
     'Smart Questions panel'
   );
+}
+
+function uniqueByNormalizedText(items) {
+  const seen = new Set();
+  const output = [];
+  for (const item of items) {
+    const normalized = normalizeLabel(item.text || item.question || item.answer || '');
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    output.push(item);
+  }
+  return output;
+}
+
+function isNoiseQuestionText(text) {
+  return [
+    /^hindi$/i,
+    /^question paper$/i,
+    /^whiteboard$/i,
+    /^q&a$/i,
+    /^create a lesson plan/i,
+    /^create a semester plan/i,
+    /^new chat$/i,
+    /^knoi$/i,
+    /^ashutosh$/i,
+    /^refresh$/i,
+    /^quick summary$/i,
+    /^key insights$/i,
+    /^ask me anything about this document/i,
+    /^exploring:/i,
+  ].some((pattern) => pattern.test(text));
+}
+
+function isQuestionLikeText(text) {
+  const normalized = normalizeLabel(text);
+  if (!normalized || normalized.length < 4) return false;
+  if (isNoiseQuestionText(normalized)) return false;
+  if (/^[^\p{L}\p{N}]+$/u.test(normalized)) return false;
+
+  const wordCount = normalized.split(' ').filter(Boolean).length;
+  const questionCues = [
+    /^what\b/i,
+    /^why\b/i,
+    /^how\b/i,
+    /^when\b/i,
+    /^where\b/i,
+    /^which\b/i,
+    /^who\b/i,
+    /^whom\b/i,
+    /^whose\b/i,
+    /^explain\b/i,
+    /^describe\b/i,
+    /^define\b/i,
+    /^compare\b/i,
+    /^contrast\b/i,
+    /^list\b/i,
+    /^state\b/i,
+    /^write\b/i,
+    /^give\b/i,
+    /^calculate\b/i,
+    /^derive\b/i,
+    /^name\b/i,
+    /^mention\b/i,
+    /^prove\b/i,
+    /^solve\b/i,
+    /^discuss\b/i,
+    /^summarize\b/i,
+    /^identify\b/i,
+    /^justify\b/i,
+    /^show\b/i,
+  ];
+
+  return /\?$/.test(normalized) || /^\d+\s+/.test(normalized) || questionCues.some((pattern) => pattern.test(normalized)) || wordCount >= 6;
+}
+
+function stripQuestionPrefix(text) {
+  return String(text || '').replace(/^\s*\d+[\s.)-:]*/, '');
+}
+
+function normalizeQuestionDisplayText(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^\d+$/.test(line))
+    .filter((line) => !/^[<>›»]+$/.test(line))
+    .filter((line) => !/^smart questions$/i.test(line))
+    .filter((line) => !/^close$/i.test(line))
+    .filter((line) => !/^x$/i.test(line))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function questionMatchScore(leftText, rightText) {
+  const left = normalizeLabel(stripQuestionPrefix(normalizeQuestionDisplayText(leftText)));
+  const right = normalizeLabel(stripQuestionPrefix(normalizeQuestionDisplayText(rightText)));
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  if (left.includes(right) || right.includes(left)) return 0.9;
+  return tokenOverlapRatio(left, right);
+}
+
+function isSameQuestion(leftText, rightText) {
+  return questionMatchScore(leftText, rightText) >= 0.75;
+}
+
+async function findSmartQuestionsPanelRoot(page) {
+  const titleLocator = page.getByText(/^\s*Smart Questions\s*$/i).first();
+  if (await titleLocator.count().catch(() => 0)) {
+    const fixedRoot = titleLocator.locator('xpath=ancestor::*[contains(@class, "fixed")][1]');
+    if (await fixedRoot.count().catch(() => 0)) {
+      return fixedRoot;
+    }
+
+    const rootedPanel = titleLocator.locator('xpath=ancestor::div[.//button][1]');
+    if (await rootedPanel.count().catch(() => 0)) {
+      return rootedPanel;
+    }
+  }
+
+  const fallbacks = [
+    'div.fixed.bottom-24',
+    'div.fixed.bottom-16',
+    'div.fixed',
+    'div[role="dialog"]',
+    'div[class*="fixed"]',
+    'div[class*="bottom"]',
+  ];
+
+  for (const selector of fallbacks) {
+    const locator = page.locator(selector).filter({ hasText: /Smart Questions/i }).first();
+    if (await locator.count().catch(() => 0)) {
+      if (await locator.isVisible().catch(() => false)) {
+        return locator;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function collectLivePanelQuestions(page) {
+  const panel = await findSmartQuestionsPanelRoot(page);
+  if (!panel) return [];
+
+  const buttons = panel.locator('button');
+  const count = await buttons.count().catch(() => 0);
+  const questions = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const button = buttons.nth(index);
+    if (!(await button.isVisible().catch(() => false))) continue;
+    const rawText = (await button.innerText().catch(() => '')).trim();
+    const questionText = normalizeQuestionDisplayText(rawText);
+    if (!questionText) continue;
+    if (isNoiseQuestionText(questionText)) continue;
+    if (/^smart questions$/i.test(questionText)) continue;
+    if (/^close$/i.test(questionText) || /^x$/i.test(questionText)) continue;
+    if (questionText.length < 6 && !/^\d+\s+/.test(questionText)) continue;
+
+    questions.push({
+      panelIndex: index,
+      locator: button,
+      text: questionText,
+      rawText,
+    });
+  }
+
+  return uniqueByNormalizedText(questions);
 }
 
 function isLikelyVisibleBox(stats) {
@@ -402,9 +726,67 @@ async function waitForComposerReady(page, timeout = 90000) {
   throw new Error('Smart question composer did not become ready in time');
 }
 
-async function clickSmartQuestion(page, questionText) {
+async function clickSmartQuestion(page, questionRef) {
+  const questionText = String(questionRef?.question ?? questionRef?.text ?? questionRef ?? '');
   const normalizedQuestion = normalizeLabel(questionText);
   const normalizedQuestionBody = normalizeLabel(questionText.replace(/^\d+\s*/, ''));
+
+  const directLocator = questionRef?.locator;
+  if (directLocator) {
+    try {
+      if (await directLocator.isVisible().catch(() => false)) {
+        await directLocator.scrollIntoViewIfNeeded().catch(() => {});
+        await directLocator.click({ force: true });
+        return { locator: directLocator, clickedText: questionText };
+      }
+    } catch (error) {
+      // Fall through to text matching if the stored locator is stale.
+    }
+  }
+
+  const livePanelCandidates = await collectLivePanelQuestions(page).catch(() => []);
+  const questionPanelIndex = Number.isInteger(questionRef?.panelIndex) ? questionRef.panelIndex : null;
+  if (questionPanelIndex !== null) {
+    const candidate = livePanelCandidates.find((item) => item.panelIndex === questionPanelIndex);
+    if (candidate) {
+      await candidate.locator.scrollIntoViewIfNeeded().catch(() => {});
+      try {
+        await candidate.locator.click({ force: true });
+      } catch (error) {
+        const elementHandle = await candidate.locator.elementHandle();
+        if (!elementHandle) throw error;
+        await elementHandle.evaluate((element) => {
+          const clickable = element.closest('button, a, [role="button"], li, div[role="button"]') || element;
+          clickable.click();
+        });
+      }
+      return { locator: candidate.locator, clickedText: candidate.text };
+    }
+  }
+
+  const questionSourceText = normalizeLabel(questionRef?.rawText || questionRef?.question || questionRef?.text || questionText);
+  for (const candidate of livePanelCandidates) {
+    const candidateText = normalizeLabel(candidate.rawText || candidate.text || '');
+    if (
+      isSameQuestion(candidate.text, questionText) ||
+      (questionSourceText && candidateText && questionSourceText === candidateText) ||
+      (questionSourceText && candidateText && (questionSourceText.includes(candidateText) || candidateText.includes(questionSourceText)))
+    ) {
+      await candidate.locator.scrollIntoViewIfNeeded().catch(() => {});
+      try {
+        await candidate.locator.click({ force: true });
+      } catch (error) {
+        const elementHandle = await candidate.locator.elementHandle();
+        if (!elementHandle) throw error;
+        await elementHandle.evaluate((element) => {
+          const clickable = element.closest('button, a, [role="button"], li, div[role="button"]') || element;
+          clickable.click();
+        });
+      }
+      return { locator: candidate.locator, clickedText: candidate.text };
+    }
+  }
+
   const textSnippets = [
     questionText,
     normalizedQuestionBody.slice(0, 48),
@@ -509,19 +891,6 @@ async function collectVisibleQuestionCandidates(page) {
     'span',
     'p',
   ];
-  const noisePatterns = [
-    /^hindi$/i,
-    /^question paper$/i,
-    /^whiteboard$/i,
-    /^q&a$/i,
-    /^create a lesson plan/i,
-    /^create a semester plan/i,
-    /^new chat$/i,
-    /^knoi$/i,
-    /^ashutosh$/i,
-    /^refresh$/i,
-    /^ask me anything about this document/i,
-  ];
   const candidates = [];
 
   for (const selector of selectors) {
@@ -532,24 +901,17 @@ async function collectVisibleQuestionCandidates(page) {
       if (!(await locator.isVisible().catch(() => false))) continue;
       const text = (await locator.innerText().catch(() => '')).trim().replace(/\s+/g, ' ');
       if (!text || text.length < 3) continue;
-      if (noisePatterns.some((pattern) => pattern.test(text))) continue;
+      if (!isQuestionLikeText(text)) continue;
 
       const box = await locator.boundingBox().catch(() => null);
       if (!box) continue;
-
-      const looksLikeQuestion =
-        /\?$/.test(text) ||
-        /^\d+\s+/.test(text) ||
-        text.length > 25;
-
-      if (!looksLikeQuestion) continue;
 
       candidates.push({ locator, text, box });
     }
   }
 
   candidates.sort((left, right) => left.box.y - right.box.y || left.box.x - right.box.x);
-  return candidates;
+  return uniqueByNormalizedText(candidates);
 }
 
 function tokenOverlapRatio(leftText, rightText) {
@@ -644,69 +1006,155 @@ async function findBestAnswerCandidate(page, beforeSignatures = new Set()) {
   return candidates[0];
 }
 
-async function captureAnswerForQuestion(page, questionText, outputBaseName) {
-  const beforeCandidates = await snapshotAnswerCandidates(page);
-  const beforeSignatures = new Set(beforeCandidates.map(answerSignature));
+async function captureAnswerForQuestion(page, questionRef, outputBaseName) {
+  const questionText = String(questionRef?.question ?? questionRef?.text ?? questionRef ?? '');
+  const retryLimit = 2;
+  for (let attempt = 1; attempt <= retryLimit; attempt += 1) {
+    const beforeCandidates = await snapshotAnswerCandidates(page);
+    const beforeSignatures = new Set(beforeCandidates.map(answerSignature));
 
-  await openSmartQuestionPanel(page).catch(() => {});
-  const clickedQuestion = await clickSmartQuestion(page, questionText);
-  console.log(`Clicked: ${clickedQuestion.clickedText}`);
-  console.log('Waiting for answer generation...');
-  await page.waitForTimeout(1000);
-  await page.getByText(/analyzing document/i).first().waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    await openSmartQuestionPanel(page).catch(() => {});
+    const clickedQuestion = await clickSmartQuestion(page, questionRef);
+    console.log(`Clicked: ${clickedQuestion.clickedText}`);
+    console.log('Waiting for answer generation...');
+    await page.waitForTimeout(1000);
+    await page.getByText(/analyzing document/i).first().waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
 
-  const deadline = Date.now() + 90000;
-  let seenAnalyzingState = false;
-  while (Date.now() < deadline) {
-    const analyzingVisible = await page.getByText(/analyzing document/i).first().isVisible().catch(() => false);
-    if (analyzingVisible) {
-      seenAnalyzingState = true;
+    const deadline = Date.now() + config.answerWaitTimeoutMs;
+    let seenAnalyzingState = false;
+    while (Date.now() < deadline) {
+      const analyzingVisible = await page.getByText(/analyzing document/i).first().isVisible().catch(() => false);
+      if (analyzingVisible) {
+        seenAnalyzingState = true;
+      }
+
+      const bestCandidate = await findBestAnswerCandidate(page, beforeSignatures);
+      if (!bestCandidate) {
+        await page.waitForTimeout(750);
+        continue;
+      }
+
+      const answerContainer = page.locator(bestCandidate.selector).nth(bestCandidate.index);
+      const answerText = (await answerContainer.innerText().catch(() => '')).trim();
+
+      if (isGenericUnavailableAnswer(answerText)) {
+        console.log('Captured unavailable-answer fallback.');
+        const imageFiles = await saveAnswerImages(answerContainer, outputBaseName);
+        return {
+          answerText,
+          imageFiles,
+          status: 'ok',
+        };
+      }
+
+      const signature = answerSignature(bestCandidate);
+      const normalizedBest = normalizeLabel(bestCandidate.text);
+      const normalizedClicked = normalizeLabel(clickedQuestion.clickedText);
+      const overlapWithClicked = tokenOverlapRatio(bestCandidate.text, clickedQuestion.clickedText);
+      const looksLikeQuestionBubble =
+        normalizedBest === normalizedClicked ||
+        normalizedBest.includes(normalizedClicked) ||
+        normalizedClicked.includes(normalizedBest) ||
+        overlapWithClicked > 0.7;
+
+      const viewport = page.viewportSize() || { width: 1440, height: 900 };
+      const isLikelyAnswerSide = bestCandidate.box ? bestCandidate.box.x < viewport.width * 0.62 : true;
+      const hasEnoughContent = bestCandidate.textLength >= 20 || bestCandidate.imageCount > 0;
+      const errorText = normalizeLabel(answerText);
+      const answerLooksValid =
+        answerText &&
+        !looksLikeQuestionBubble &&
+        isLikelyAnswerSide &&
+        hasEnoughContent &&
+        !/^smart questions$/i.test(answerText) &&
+        !/^analyzing document$/i.test(answerText);
+
+      if (
+        answerLooksValid &&
+        !beforeSignatures.has(signature)
+      ) {
+        if (
+          errorText.includes('request timed out') &&
+          errorText.includes('please try again') &&
+          attempt < retryLimit
+        ) {
+          console.log(`Retrying question after timeout error (attempt ${attempt + 1}/${retryLimit})...`);
+          break;
+        }
+
+        console.log('Answer captured.');
+        const imageFiles = await saveAnswerImages(answerContainer, outputBaseName);
+        return {
+          answerText,
+          imageFiles,
+          status: 'ok',
+        };
+      }
+
+      await page.waitForTimeout(750);
     }
 
-    const bestCandidate = await findBestAnswerCandidate(page, beforeSignatures);
-    if (!bestCandidate) {
-      await page.waitForTimeout(750);
+    if (attempt < retryLimit) {
+      await page.waitForTimeout(1000);
       continue;
     }
 
-    const signature = answerSignature(bestCandidate);
-    const normalizedBest = normalizeLabel(bestCandidate.text);
-    const normalizedClicked = normalizeLabel(clickedQuestion.clickedText);
-    const overlapWithClicked = tokenOverlapRatio(bestCandidate.text, clickedQuestion.clickedText);
-    const looksLikeQuestionBubble =
-      normalizedBest === normalizedClicked ||
-      normalizedBest.includes(normalizedClicked) ||
-      normalizedClicked.includes(normalizedBest) ||
-      overlapWithClicked > 0.7;
-
-    const viewport = page.viewportSize() || { width: 1440, height: 900 };
-    const isLikelyAnswerSide = bestCandidate.box ? bestCandidate.box.x < viewport.width * 0.62 : true;
-    const hasEnoughContent = bestCandidate.textLength >= 20 || bestCandidate.imageCount > 0;
-
-    if (
-      seenAnalyzingState &&
-      !analyzingVisible &&
-      !beforeSignatures.has(signature) &&
-      bestCandidate.text &&
-      !looksLikeQuestionBubble &&
-      isLikelyAnswerSide &&
-      hasEnoughContent
-    ) {
-      const answerContainer = page.locator(bestCandidate.selector).nth(bestCandidate.index);
-      const answerText = (await answerContainer.innerText().catch(() => '')).trim();
-      console.log('Answer captured.');
-      const imageFiles = await saveAnswerImages(answerContainer, outputBaseName);
-      return {
-        answerText,
-        imageFiles,
-      };
-    }
-
-    await page.waitForTimeout(750);
+    console.log(`Timed out after ${Math.round(config.answerWaitTimeoutMs / 60000)} min waiting for answer: ${questionText}`);
+    return {
+      answerText: '',
+      imageFiles: [],
+      status: 'timeout',
+    };
   }
 
-  await dumpDebug(page, 'answer-timeout');
-  throw new Error(`Answer generation did not produce visible output for: ${questionText}`);
+  return {
+    answerText: '',
+    imageFiles: [],
+    status: 'timeout',
+  };
+}
+
+async function waitForSmartQuestionsToLoad(page, timeout = config.questionLoadTimeoutMs) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const candidates = await collectLivePanelQuestions(page).catch(() => []);
+    if (candidates.length) return candidates;
+    await page.waitForTimeout(500);
+  }
+
+  return [];
+}
+
+async function extractLiveSmartQuestions(page) {
+  await openSmartQuestionPanel(page);
+  const candidates = await waitForSmartQuestionsToLoad(page);
+  const questions = uniqueByNormalizedText(
+    candidates
+      .map((candidate) => ({
+        panelIndex: candidate.panelIndex,
+        question: candidate.text,
+        locator: candidate.locator,
+        rawText: candidate.rawText,
+      }))
+      .filter((candidate) => isQuestionLikeText(candidate.question))
+  );
+
+  if (!questions.length) {
+    await dumpDebug(page, 'smart-question-extraction-failure');
+    throw new Error('No live Smart Questions were found on the page');
+  }
+
+  return questions.map((question, index) => ({
+    sourceLine: index + 1,
+    sl: String(index + 1),
+    board: config.boardName,
+    className: config.className,
+    book: config.bookName,
+    question: question.question,
+    answer: '',
+    locator: question.locator,
+    panelIndex: question.panelIndex,
+  }));
 }
 
 async function saveAnswerImages(answerContainer, outputBaseName) {
@@ -730,23 +1178,46 @@ async function saveAnswerImages(answerContainer, outputBaseName) {
   return savedFiles;
 }
 
+function buildOutputBaseName(bookStem, questionIndex) {
+  const prefix = toReadableFileStem(bookStem, config.outputPrefix);
+  return `${prefix}-q-${String(questionIndex).padStart(3, '0')}`;
+}
+
 function toCsv(rows) {
-  const headers = ['source_line', 'sl', 'board', 'class', 'book', 'question', 'answer', 'image_files'];
+  const headers = ['source_line', 'sl', 'book', 'question', 'answer', 'image_files', 'status', 'error_message'];
   const escapeCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
   const lines = [`\uFEFF${headers.map(escapeCell).join(',')}`];
   for (const row of rows) {
     lines.push([
       row.sourceLine,
       row.sl,
-      row.board,
-      row.className,
       row.book,
       row.question,
       row.answer,
       row.imageFiles && row.imageFiles.length ? row.imageFiles.join(' | ') : '',
+      row.status || '',
+      row.errorMessage || '',
     ].map(escapeCell).join(','));
   }
   return `${lines.join('\n')}\n`;
+}
+
+function sanitizeDelimitedText(value) {
+  return String(value ?? '')
+    .replace(/\r?\n+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeExportRows(rows) {
+  return rows.map((row) => ({
+    ...row,
+    question: sanitizeDelimitedText(row.question),
+    answer: sanitizeDelimitedText(row.answer),
+    imageFiles: Array.isArray(row.imageFiles) ? row.imageFiles : [],
+    status: sanitizeDelimitedText(row.status),
+    errorMessage: sanitizeDelimitedText(row.errorMessage),
+  }));
 }
 
 async function exportResults(rows) {
@@ -755,8 +1226,10 @@ async function exportResults(rows) {
   const xlsxPath = path.resolve(`${config.outputPrefix}.xlsx`);
 
   await fsPromises.writeFile(jsonPath, JSON.stringify(rows, null, 2), 'utf8');
-  await fsPromises.writeFile(csvPath, toCsv(rows), 'utf8');
-  await writeExcelWorkbook(rows, xlsxPath).catch((error) => {
+  const jsonRows = JSON.parse(await fsPromises.readFile(jsonPath, 'utf8'));
+  const exportRows = normalizeExportRows(jsonRows);
+  await fsPromises.writeFile(csvPath, toCsv(exportRows), 'utf8');
+  await writeExcelWorkbook(exportRows, xlsxPath).catch((error) => {
     console.log(`Excel export skipped: ${error.message}`);
   });
 
@@ -775,57 +1248,141 @@ $excel = New-Object -ComObject Excel.Application
 $excel.Visible = $false
 $excel.DisplayAlerts = $false
 $workbook = $excel.Workbooks.Add()
-$sheet = $workbook.Worksheets.Item(1)
-$headers = @('source_line','sl','board','class','book','question','answer','image_files')
+$pairsSheet = $workbook.Worksheets.Item(1)
+$pairsSheet.Name = 'Pairs'
+$headers = @('source_line','sl','book','question','answer','image_files','status','error_message')
 for ($i = 0; $i -lt $headers.Count; $i++) {
-  $sheet.Cells.Item(1, $i + 1) = $headers[$i]
+  $pairsSheet.Cells.Item(1, $i + 1) = $headers[$i]
 }
 for ($rowIndex = 0; $rowIndex -lt $rows.Count; $rowIndex++) {
   $row = $rows[$rowIndex]
   $values = @(
     $row.sourceLine,
     $row.sl,
-    $row.board,
-    $row.className,
     $row.book,
     $row.question,
     $row.answer,
-    ($row.imageFiles -join ' | ')
+    ($row.imageFiles -join ' | '),
+    $row.status,
+    $row.errorMessage
   )
   for ($columnIndex = 0; $columnIndex -lt $values.Count; $columnIndex++) {
-    $sheet.Cells.Item($rowIndex + 2, $columnIndex + 1) = $values[$columnIndex]
+    $pairsSheet.Cells.Item($rowIndex + 2, $columnIndex + 1) = $values[$columnIndex]
   }
 }
+
+$wideSheet = $workbook.Worksheets.Add()
+$wideSheet.Name = 'Wide'
+if ($rows.Count -gt 0) {
+  $wideHeaders = @()
+  for ($rowIndex = 0; $rowIndex -lt $rows.Count; $rowIndex++) {
+    $displayIndex = $rowIndex + 1
+    $wideHeaders += "Q$displayIndex"
+    $wideHeaders += "Ans$displayIndex"
+  }
+  for ($columnIndex = 0; $columnIndex -lt $wideHeaders.Count; $columnIndex++) {
+    $wideSheet.Cells.Item(1, $columnIndex + 1) = $wideHeaders[$columnIndex]
+  }
+  for ($rowIndex = 0; $rowIndex -lt $rows.Count; $rowIndex++) {
+    $row = $rows[$rowIndex]
+    $questionColumn = ($rowIndex * 2) + 1
+    $answerColumn = $questionColumn + 1
+    $wideSheet.Cells.Item(2, $questionColumn) = $row.question
+    $wideSheet.Cells.Item(2, $answerColumn) = $row.answer
+  }
+}
+
 $workbook.SaveAs('${escapedXlsxPath}', 51)
+$pairsSheet.UsedRange.Columns.AutoFit() | Out-Null
+$pairsSheet.UsedRange.Rows.AutoFit() | Out-Null
+$wideSheet.UsedRange.Columns.AutoFit() | Out-Null
+$wideSheet.UsedRange.Rows.AutoFit() | Out-Null
 $workbook.Close($true)
 $excel.Quit()
 `;
 
-  const result = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
-    stdio: 'pipe',
-  });
+  try {
+    const result = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+      stdio: 'pipe',
+    });
 
-  const exitCode = await new Promise((resolve) => {
-    result.on('exit', resolve);
-  });
+    const exitCode = await new Promise((resolve) => {
+      result.on('exit', resolve);
+    });
 
-  if (exitCode !== 0) {
-    throw new Error(`PowerShell Excel export failed with exit code ${exitCode}`);
+    if (exitCode !== 0) {
+      throw new Error(`PowerShell Excel export failed with exit code ${exitCode}`);
+    }
+  } finally {
+    await fsPromises.unlink(tempJsonPath).catch(() => {});
   }
-
-  await fsPromises.unlink(tempJsonPath).catch(() => {});
 }
 
 async function dumpDebug(page, label) {
-  const safeLabel = String(label).replace(/[^a-z0-9_-]+/gi, '_').toLowerCase();
-  const screenshotPath = path.resolve(`knoi-debug-${safeLabel}.png`);
-  const htmlPath = path.resolve(`knoi-debug-${safeLabel}.html`);
+  return label;
+}
 
-  await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
-  await fsPromises.writeFile(htmlPath, await page.content(), 'utf8').catch(() => {});
+function extractDocumentName(pageTitle) {
+  const title = String(pageTitle || '');
+  const match = title.match(/Exploring:\s*([^\r\n]+)/i);
+  const rawName = (match ? match[1] : title).trim();
+  return rawName.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
 
-  console.log(`Debug saved: ${screenshotPath}`);
-  console.log(`Debug saved: ${htmlPath}`);
+function extractPdfStemFromUrl(urlString) {
+  if (!urlString) return '';
+
+  try {
+    const url = new URL(urlString);
+    const pathMatch = path.basename(url.pathname || '');
+    if (pathMatch && /\.pdf$/i.test(pathMatch)) {
+      return sanitizeFileStem(pathMatch.replace(/\.pdf$/i, ''));
+    }
+
+    const searchParams = ['filename', 'file', 'name', 'document', 'pdf'];
+    for (const key of searchParams) {
+      const value = url.searchParams.get(key);
+      if (value && /\.pdf$/i.test(value)) {
+        return sanitizeFileStem(value.replace(/\.pdf$/i, ''));
+      }
+    }
+  } catch (error) {
+    // Ignore malformed URLs and fall back to other strategies.
+  }
+
+  const raw = String(urlString).match(/([^/?#]+)\.pdf(?:$|[?#])/i)?.[1] || '';
+  return raw ? sanitizeFileStem(raw) : '';
+}
+
+async function inferOutputStem(page, fallbackTitle = '') {
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const exploringMatch = String(bodyText || '').match(/Exploring:\s*([^\n]+)/i);
+  const exploringLabel = exploringMatch ? exploringMatch[1] : '';
+  if (exploringLabel) {
+    return toReadableFileStem(exploringLabel);
+  }
+
+  const pageUrl = page.url();
+  const urlStem = extractPdfStemFromUrl(pageUrl);
+  if (urlStem) {
+    return urlStem;
+  }
+
+  const pdfLink = page.locator('a[href*=".pdf" i], iframe[src*=".pdf" i], embed[src*=".pdf" i]').first();
+  if (await pdfLink.count().catch(() => 0)) {
+    const href = await pdfLink.getAttribute('href').catch(() => '') || await pdfLink.getAttribute('src').catch(() => '');
+    const linkStem = extractPdfStemFromUrl(href);
+    if (linkStem) {
+      return linkStem;
+    }
+  }
+
+  const titleStem = extractDocumentName(fallbackTitle || (await page.title().catch(() => '')));
+  if (titleStem) {
+    return toReadableFileStem(titleStem);
+  }
+
+  return sanitizeFileStem('knoi-smart-questions');
 }
 
 async function createBrowserSession() {
@@ -905,9 +1462,10 @@ async function run() {
     return;
   }
 
-  const session = await createBrowserSession();
-  const existingPages = session.context.pages();
-  const page = existingPages[0] || (await session.context.newPage());
+  startKeepAwake();
+  let session = await createBrowserSession();
+  let existingPages = session.context.pages();
+  let page = existingPages[0] || (await session.context.newPage());
   await page.bringToFront().catch(() => {});
   try {
     await ensureOn(page, ensureAbsoluteUrl(config.baseUrl, config.loginPath));
@@ -915,50 +1473,143 @@ async function run() {
 
     await waitForEnter('Open the target document analysis page and press Enter to start Smart Questions');
 
-    try {
-      await openSmartQuestionPanel(page);
-    } catch (error) {
-      console.log(`Panel lookup failed at URL: ${page.url()}`);
-      console.log(`Page title: ${await page.title().catch(() => '')}`);
-      await dumpDebug(page, 'smart-question-panel-failure');
-      throw error;
+    let questions = [];
+    if (config.questionSource === 'file') {
+      questions = await loadQuestionsFromCsv(config.questionCsvPath, config.questionStartLine);
+      if (!questions.length) {
+        throw new Error(`No questions found from ${config.questionCsvPath} starting at line ${config.questionStartLine}`);
+      }
+      console.log(`Loaded ${questions.length} questions from file mode`);
+      console.log(`Questions file: ${config.questionCsvPath}`);
+    } else {
+      try {
+        questions = await extractLiveSmartQuestions(page);
+      } catch (error) {
+        console.log(`Live Smart Question extraction failed at URL: ${page.url()}`);
+        console.log(`Page title: ${await page.title().catch(() => '')}`);
+        await dumpDebug(page, 'smart-question-panel-failure');
+        throw error;
+      }
+      console.log(`Loaded ${questions.length} live Smart Questions from the page`);
     }
 
-    const questions = await loadQuestionsFromCsv(config.questionCsvPath, config.questionStartLine);
-    if (!questions.length) {
-      throw new Error(`No questions found from ${config.questionCsvPath} starting at line ${config.questionStartLine}`);
+    const pageTitle = await page.title().catch(() => '');
+    const pageBodyText = await page.locator('body').innerText().catch(() => '');
+    const documentName = normalizeExploringLabel(extractDocumentName(pageBodyText || pageTitle));
+    const inferredOutputPrefix = await inferOutputStem(page, pageTitle);
+    config.outputPrefix = process.env.OUTPUT_PREFIX
+      ? sanitizeFileStem(config.outputPrefix, inferredOutputPrefix)
+      : inferredOutputPrefix;
+    const checkpointPath = getCheckpointPath();
+    const currentPageUrl = page.url();
+    let results = [];
+    let startIndex = 0;
+    const checkpoint = config.resumeFromCheckpoint ? await loadRunCheckpoint(checkpointPath) : null;
+    if (
+      checkpoint &&
+      Array.isArray(checkpoint.questions) &&
+      Array.isArray(checkpoint.results) &&
+      checkpoint.questions.length &&
+      checkpoint.results.length <= checkpoint.questions.length
+    ) {
+      questions = checkpoint.questions;
+      results = checkpoint.results;
+      startIndex = results.length;
+      console.log(`Resuming from checkpoint: ${startIndex}/${questions.length} questions already completed`);
     }
 
-    console.log(`Loaded ${questions.length} questions from line ${config.questionStartLine} onward`);
-    console.log(`Questions file: ${config.questionCsvPath}`);
+    await saveRunCheckpoint(checkpointPath, {
+      createdAt: checkpoint?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      outputPrefix: config.outputPrefix,
+      questions,
+      results,
+      nextIndex: startIndex,
+      pageUrl: checkpoint?.pageUrl || currentPageUrl,
+    });
 
-    const results = [];
-
-    for (const question of questions) {
-      const outputBaseName = `line-${String(question.sourceLine).padStart(3, '0')}-sl-${String(question.sl || '').padStart(3, '0')}`;
-      console.log(`Submitting line ${question.sourceLine}: ${question.question}`);
-      const captured = await captureAnswerForQuestion(page, question.question, outputBaseName);
+    for (let index = startIndex; index < questions.length; index += 1) {
+      const question = questions[index];
+      const questionIndex = index + 1;
+      const outputBaseName = buildOutputBaseName(config.outputPrefix, questionIndex);
+      console.log(`Submitting question ${questionIndex}: ${question.question}`);
+      let captured;
+      try {
+        captured = await captureAnswerForQuestion(page, question, outputBaseName);
+      } catch (error) {
+        if (isRecoverableSessionError(error)) {
+          console.log(`Browser session dropped while processing question ${questionIndex}. Reconnecting...`);
+          await saveRunCheckpoint(checkpointPath, {
+            createdAt: checkpoint?.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            outputPrefix: config.outputPrefix,
+            questions,
+            results,
+            nextIndex: index,
+            pageUrl: page.url(),
+          });
+          await session.browser.close().catch(() => {});
+          session = await createBrowserSession();
+          existingPages = session.context.pages();
+          page = existingPages[0] || (await session.context.newPage());
+          await page.bringToFront().catch(() => {});
+          const resumeUrl = checkpoint?.pageUrl || ensureAbsoluteUrl(config.baseUrl, config.loginPath);
+          if (resumeUrl) {
+            await page.goto(resumeUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+          }
+          console.log('Session restored. Re-run the question if the page is visible again.');
+          captured = await captureAnswerForQuestion(page, question, outputBaseName).catch((retryError) => {
+            console.log(`Question ${questionIndex} failed after reconnect: ${retryError.message}`);
+            return {
+              answerText: '',
+              imageFiles: [],
+              status: 'error',
+              errorMessage: retryError.message,
+            };
+          });
+        } else {
+          console.log(`Question ${questionIndex} failed: ${error.message}`);
+          captured = {
+            answerText: '',
+            imageFiles: [],
+            status: 'error',
+            errorMessage: error.message,
+          };
+        }
+      }
       const row = {
-        sourceLine: question.sourceLine,
-        sl: question.sl,
-        board: question.board || config.boardName,
-        className: question.className || config.className,
-        book: question.book || config.bookName,
+        sourceLine: question.sourceLine ?? questionIndex,
+        sl: question.sl ?? String(questionIndex),
+        book: question.book || documentName || config.bookName,
         question: question.question,
         answer: captured.answerText,
         imageFiles: captured.imageFiles,
+        questionIndex,
+        status: captured.status || 'ok',
+        errorMessage: captured.errorMessage || '',
       };
       results.push(row);
       console.log(JSON.stringify(row, null, 2));
+      await saveRunCheckpoint(checkpointPath, {
+        createdAt: checkpoint?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        outputPrefix: config.outputPrefix,
+        questions,
+        results,
+        nextIndex: index + 1,
+        pageUrl: page.url(),
+      });
       await page.waitForTimeout(config.questionDelayMs).catch(() => {});
     }
 
     const output = await exportResults(results);
     console.log(`Saved ${results.length} rows to ${output.csvPath}, ${output.jsonPath}, and ${output.xlsxPath}`);
+    await clearRunCheckpoint(checkpointPath);
   } finally {
     if (session.ownsBrowser) {
       await session.browser.close().catch(() => {});
     }
+    await stopKeepAwake();
   }
 }
 

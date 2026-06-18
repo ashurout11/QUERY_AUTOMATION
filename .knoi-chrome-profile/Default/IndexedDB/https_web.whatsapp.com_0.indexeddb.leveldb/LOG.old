@@ -1,0 +1,67 @@
+2026/06/18-11:48:54.254 ffc Reusing MANIFEST D:\QUERY_AUTOMATION\.knoi-chrome-profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/06/18-11:48:54.267 ffc Recovering log #781
+2026/06/18-11:48:54.512 ffc Reusing old log D:\QUERY_AUTOMATION\.knoi-chrome-profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000781.log 
+2026/06/18-12:19:27.454 5b0c Level-0 table #796: started
+2026/06/18-12:19:28.091 5b0c Level-0 table #796: 1186201 bytes OK
+2026/06/18-12:19:28.190 5b0c Delete type=0 #781
+2026/06/18-12:19:28.196 5b0c Compacting 1@0 + 0@1 files
+2026/06/18-12:19:28.288 5b0c Generated table #797@0: 29432 keys, 658469 bytes
+2026/06/18-12:19:28.288 5b0c Compacted 1@0 + 0@1 files => 658469 bytes
+2026/06/18-12:19:28.356 5b0c compacted to: files[ 0 1 10 0 0 0 0 ]
+2026/06/18-12:19:28.366 5b0c Compacting 1@1 + 10@2 files
+2026/06/18-12:19:28.644 5b0c Generated table #798@1: 41737 keys, 2206738 bytes
+2026/06/18-12:19:28.830 5b0c Generated table #799@1: 61693 keys, 2225123 bytes
+2026/06/18-12:19:29.066 5b0c Generated table #800@1: 50735 keys, 2219718 bytes
+2026/06/18-12:19:29.481 5b0c Generated table #801@1: 11659 keys, 2155566 bytes
+2026/06/18-12:19:29.683 5b0c Generated table #802@1: 1940 keys, 2151676 bytes
+2026/06/18-12:19:29.874 5b0c Level-0 table #805: started
+2026/06/18-12:19:29.928 5b0c Level-0 table #805: 189640 bytes OK
+2026/06/18-12:19:29.982 5b0c Delete type=0 #795
+2026/06/18-12:19:29.983 5b0c Delete type=2 #796
+2026/06/18-12:19:30.107 5b0c Generated table #803@1: 11673 keys, 2188464 bytes
+2026/06/18-12:19:30.369 5b0c Generated table #806@1: 22907 keys, 2216883 bytes
+2026/06/18-12:19:30.684 5b0c Generated table #807@1: 23465 keys, 2236913 bytes
+2026/06/18-12:19:30.879 5b0c Generated table #808@1: 62790 keys, 2204195 bytes
+2026/06/18-12:19:31.032 5b0c Generated table #809@1: 46109 keys, 1367705 bytes
+2026/06/18-12:19:31.032 5b0c Compacted 1@1 + 10@2 files => 21172981 bytes
+2026/06/18-12:19:31.058 5b0c compacted to: files[ 1 0 10 0 0 0 0 ]
+2026/06/18-12:19:31.060 5b0c Delete type=2 #784
+2026/06/18-12:19:31.060 5b0c Delete type=2 #785
+2026/06/18-12:19:31.060 5b0c Delete type=2 #786
+2026/06/18-12:19:31.061 5b0c Delete type=2 #787
+2026/06/18-12:19:31.061 5b0c Delete type=2 #788
+2026/06/18-12:19:31.061 5b0c Delete type=2 #789
+2026/06/18-12:19:31.061 5b0c Delete type=2 #790
+2026/06/18-12:19:31.061 5b0c Delete type=2 #791
+2026/06/18-12:19:31.061 5b0c Delete type=2 #792
+2026/06/18-12:19:31.061 5b0c Delete type=2 #793
+2026/06/18-12:19:31.061 5b0c Delete type=2 #797
+2026/06/18-12:19:31.096 3494 Manual compaction at level-0 from (begin) .. (end); will stop at '\x00\x030#\x04\x03\x01,\x00y\x00h\x00c\x00B\x00c\x00t\x00Z\x00d\x00l\x00F\x00T\x00a\x00J\x00o\x007\x00P\x00E\x00X\x00V\x00h\x00s\x00k\x003\x004\x007\x00B\x00l\x00B\x00e\x002\x00v\x00C\x00h\x00e\x00I\x00+\x00v\x00m\x006\x00y\x00g\x00T\x00s\x00=\x01\x0f\x00F\x00a\x00v\x00o\x00r\x00i\x00t\x00e\x00S\x00t\x00i\x00c\x00k\x00e\x00r\x01\x06\x00O\x00r\x00p\x00h\x00a\x00n\x00\x01B\x00[\x00"\x00f\x00a\x00v\x00o\x00r\x00i\x00t\x00e\x00S\x00t\x00i\x00c\x00k\x00e\x00r\x00"\x00,\x00"\x00y\x00h\x00c\x00B\x00c\x00t\x00Z\x00d\x00l\x00F\x00T\x00a\x00J\x00o\x007\x00P\x00E\x00X\x00V\x00h\x00s\x00k\x003\x004\x007\x00B\x00l\x00B\x00e\x002\x00v\x00C\x00h\x00e\x00I\x00+\x00v\x00m\x006\x00y\x00g\x00T\x00s\x00=\x00"\x00]' @ 3021071 : 0
+2026/06/18-12:19:31.097 3494 Compacting 1@0 + 0@1 files
+2026/06/18-12:19:31.136 3494 Generated table #810@0: 9770 keys, 189640 bytes
+2026/06/18-12:19:31.137 3494 Compacted 1@0 + 0@1 files => 189640 bytes
+2026/06/18-12:19:31.186 3494 compacted to: files[ 0 1 10 0 0 0 0 ]
+2026/06/18-12:19:31.187 3494 Delete type=2 #805
+2026/06/18-12:19:31.189 5b0c Manual compaction at level-0 from '\x00\x030#\x04\x03\x01,\x00y\x00h\x00c\x00B\x00c\x00t\x00Z\x00d\x00l\x00F\x00T\x00a\x00J\x00o\x007\x00P\x00E\x00X\x00V\x00h\x00s\x00k\x003\x004\x007\x00B\x00l\x00B\x00e\x002\x00v\x00C\x00h\x00e\x00I\x00+\x00v\x00m\x006\x00y\x00g\x00T\x00s\x00=\x01\x0f\x00F\x00a\x00v\x00o\x00r\x00i\x00t\x00e\x00S\x00t\x00i\x00c\x00k\x00e\x00r\x01\x06\x00O\x00r\x00p\x00h\x00a\x00n\x00\x01B\x00[\x00"\x00f\x00a\x00v\x00o\x00r\x00i\x00t\x00e\x00S\x00t\x00i\x00c\x00k\x00e\x00r\x00"\x00,\x00"\x00y\x00h\x00c\x00B\x00c\x00t\x00Z\x00d\x00l\x00F\x00T\x00a\x00J\x00o\x007\x00P\x00E\x00X\x00V\x00h\x00s\x00k\x003\x004\x007\x00B\x00l\x00B\x00e\x002\x00v\x00C\x00h\x00e\x00I\x00+\x00v\x00m\x006\x00y\x00g\x00T\x00s\x00=\x00"\x00]' @ 3021071 : 0 .. (end); will stop at (end)
+2026/06/18-12:19:31.190 5b0c Manual compaction at level-1 from (begin) .. (end); will stop at '\x00\x030#\x04\x03\x01,\x00y\x00h\x00c\x00B\x00c\x00t\x00Z\x00d\x00l\x00F\x00T\x00a\x00J\x00o\x007\x00P\x00E\x00X\x00V\x00h\x00s\x00k\x003\x004\x007\x00B\x00l\x00B\x00e\x002\x00v\x00C\x00h\x00e\x00I\x00+\x00v\x00m\x006\x00y\x00g\x00T\x00s\x00=\x01\x0f\x00F\x00a\x00v\x00o\x00r\x00i\x00t\x00e\x00S\x00t\x00i\x00c\x00k\x00e\x00r\x01\x06\x00O\x00r\x00p\x00h\x00a\x00n\x00\x01B\x00[\x00"\x00f\x00a\x00v\x00o\x00r\x00i\x00t\x00e\x00S\x00t\x00i\x00c\x00k\x00e\x00r\x00"\x00,\x00"\x00y\x00h\x00c\x00B\x00c\x00t\x00Z\x00d\x00l\x00F\x00T\x00a\x00J\x00o\x007\x00P\x00E\x00X\x00V\x00h\x00s\x00k\x003\x004\x007\x00B\x00l\x00B\x00e\x002\x00v\x00C\x00h\x00e\x00I\x00+\x00v\x00m\x006\x00y\x00g\x00T\x00s\x00=\x00"\x00]' @ 3021071 : 0
+2026/06/18-12:19:31.190 5b0c Compacting 1@1 + 8@2 files
+2026/06/18-12:19:31.467 5b0c Generated table #811@1: 39679 keys, 2204054 bytes
+2026/06/18-12:19:31.878 5b0c Generated table #812@1: 62316 keys, 2225455 bytes
+2026/06/18-12:19:32.178 5b0c Generated table #813@1: 46110 keys, 2212585 bytes
+2026/06/18-12:19:32.272 5b0c Generated table #814@1: 8492 keys, 2153638 bytes
+2026/06/18-12:19:32.354 5b0c Generated table #815@1: 1753 keys, 2148277 bytes
+2026/06/18-12:19:32.474 5b0c Generated table #816@1: 15009 keys, 2207155 bytes
+2026/06/18-12:19:32.637 5b0c Generated table #817@1: 20353 keys, 2205960 bytes
+2026/06/18-12:19:32.781 5b0c Generated table #818@1: 22327 keys, 1928554 bytes
+2026/06/18-12:19:32.782 5b0c Compacted 1@1 + 8@2 files => 17285678 bytes
+2026/06/18-12:19:32.855 5b0c compacted to: files[ 0 0 10 0 0 0 0 ]
+2026/06/18-12:19:32.857 5b0c Delete type=2 #798
+2026/06/18-12:19:32.857 5b0c Delete type=2 #799
+2026/06/18-12:19:32.857 5b0c Delete type=2 #800
+2026/06/18-12:19:32.858 5b0c Delete type=2 #801
+2026/06/18-12:19:32.858 5b0c Delete type=2 #802
+2026/06/18-12:19:32.858 5b0c Delete type=2 #803
+2026/06/18-12:19:32.858 5b0c Delete type=2 #806
+2026/06/18-12:19:32.859 5b0c Delete type=2 #807
+2026/06/18-12:19:32.859 5b0c Delete type=2 #810
+2026/06/18-12:19:32.877 5b0c Manual compaction at level-1 from '\x00\x030#\x04\x03\x01,\x00y\x00h\x00c\x00B\x00c\x00t\x00Z\x00d\x00l\x00F\x00T\x00a\x00J\x00o\x007\x00P\x00E\x00X\x00V\x00h\x00s\x00k\x003\x004\x007\x00B\x00l\x00B\x00e\x002\x00v\x00C\x00h\x00e\x00I\x00+\x00v\x00m\x006\x00y\x00g\x00T\x00s\x00=\x01\x0f\x00F\x00a\x00v\x00o\x00r\x00i\x00t\x00e\x00S\x00t\x00i\x00c\x00k\x00e\x00r\x01\x06\x00O\x00r\x00p\x00h\x00a\x00n\x00\x01B\x00[\x00"\x00f\x00a\x00v\x00o\x00r\x00i\x00t\x00e\x00S\x00t\x00i\x00c\x00k\x00e\x00r\x00"\x00,\x00"\x00y\x00h\x00c\x00B\x00c\x00t\x00Z\x00d\x00l\x00F\x00T\x00a\x00J\x00o\x007\x00P\x00E\x00X\x00V\x00h\x00s\x00k\x003\x004\x007\x00B\x00l\x00B\x00e\x002\x00v\x00C\x00h\x00e\x00I\x00+\x00v\x00m\x006\x00y\x00g\x00T\x00s\x00=\x00"\x00]' @ 3021071 : 0 .. (end); will stop at (end)

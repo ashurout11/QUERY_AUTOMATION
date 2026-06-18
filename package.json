@@ -6,7 +6,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "knoi:verify": "node auth.js",
-    "knoi:manual": "node auth.js"
+    "knoi:manual": "node auth.js",
+    "knoi:live": "node auth.js --source live",
+    "knoi:file": "node auth.js --source file"
   },
   "keywords": [],
   "author": "",

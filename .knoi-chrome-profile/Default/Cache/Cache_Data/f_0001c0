@@ -1,0 +1,787 @@
+
+	   document.addEventListener('DOMContentLoaded', function () {
+    // Select the containers with multiple classes
+    var accContainers = document.querySelectorAll('.scms-acc, .scms-acc-info-box1, .scms-acc-info-box2, .scms-acc-info-box3, .scms-acc-info-box4');
+
+    // If containers exist, loop through each container
+    accContainers.forEach(function (accContainer) {
+        // List of classes you want to remove
+        var classesToRemove = [
+            'navbar-nav', 'shadow ','nav-item', 'nav-link', 'dropdown-toggle', 'dropdown-menu', 'dropdown', 'dropend', 'active'
+        ];
+
+        // Find all elements inside each container
+        var elements = accContainer.querySelectorAll('*');
+
+        // Loop through each element and remove the matching classes
+        elements.forEach(function (el) {
+            classesToRemove.forEach(function (className) {
+                if (el.classList.contains(className)) {
+                    el.classList.remove(className);
+                }
+            });
+
+            // Remove specific attributes: role="button", data-bs-toggle, and data-bs-auto-close
+            el.removeAttribute('role');
+         
+            el.removeAttribute('data-bs-auto-close');
+        });
+    });
+});
+
+
+
+$(document).ready(function(){
+
+
+
+$('a[data-bs-toggle="dropdown"]').removeAttr('href');
+
+
+	$('*[data-linkify]').each(function() { 
+  $(this).html($(this).html().replace(/(?:(https?\:\/\/[^\s]+))/m, '<a href="$1">$1</a>'));
+});
+	
+$('.extra-fields-customer').click(function() {
+  $('.customer_records').clone().appendTo('.customer_records_dynamic');
+  $('.customer_records_dynamic .customer_records').addClass('single remove');
+  $('.single .extra-fields-customer').remove();
+  $('.single').append('<button class="remove-field btn-remove-customer btn btn-danger">Remove Member</button>');
+  $('.customer_records_dynamic > .single').attr("class", "remove");
+  
+  $('.customer_records_dynamic input').each(function() {
+    var count = 1;
+    var fieldname = $(this).attr("name");
+    $(this).attr('name', fieldname + count );
+    count++;
+  });
+
+});
+
+$(document).on('click', '.remove-field', function(e) {
+  $(this).parent('.remove').remove();
+  e.preventDefault();
+});
+	
+$('#dual_citizenship').change(function () {
+
+var select=$(this).find(':selected').val();        
+ $(".hide2").hide();
+ $('#' + select).show();
+
+	    }).change();	
+	
+	$('#Grievance_related_to').change(function () {
+
+var select=$(this).find(':selected').val();        
+ $(".hide2").hide();
+ $('#' + select).show();
+
+	    }).change();	
+	
+	
+$('#select_box').change(function () {
+
+var select=$(this).find(':selected').val();        
+ $(".hide2").hide();
+ $('#' + select).show();
+
+	    }).change();
+
+    if(window.matchMedia("(max-width: 979px)").matches){
+        // The viewport is less than 768 pixels wide
+       $('.navside').addClass('navside-enlarge');
+            $('.navside').addClass('navdisplay');
+            $('.navdesk').addClass('navhide');
+    } else{
+ 
+// For .deskmenu, show only the first 10 items and hide the rest
+$( ".deskmenu>li" ).slice(0, 6).show();  // Show the first 10 items
+$( ".deskmenu>li" ).slice(6).hide();     // Hide items from the 11th onwards
+
+// For .extramenudesk, show items starting from the 11th position
+$( ".extramenudesk>li" ).slice(0, 6).hide();  // Hide the first 10 items
+$( ".extramenudesk>li" ).slice(6).show();     // Show items starting from the 11th position
+
+    }
+});
+
+
+
+
+
+
+
+ 
+
+
+
+$(".blinkme a").after("<span class=blink22>new</span>");
+
+$('table').addClass('table-striped');
+$('table').addClass('table-bordered');
+
+  // alert("hi");
+    $("#accordian a").click(function() {
+        var link = $(this);
+        var closest_ul = link.closest("ul");
+        var parallel_active_links = closest_ul.find(".active")
+        var closest_li = link.closest("li");
+        var link_status = closest_li.hasClass("active");
+        var count = 0;
+
+        closest_ul.find("ul").slideUp(function() {
+            if (++count == closest_ul.find("ul").length)
+                parallel_active_links.removeClass("active");
+        });
+
+        if (!link_status) {
+            closest_li.children("ul").slideDown();
+            closest_li.addClass("active");
+        }
+    })
+
+
+$( document ).ready(function() {
+
+
+
+ 
+ $("img[src*='pdf_place.jpg']").parent().addClass("test").parent().addClass("test2");
+$("img[src*='pdf_place.jpg']").parent().css("display","none");
+$("a[href$='.pdf']").parent().css("float","inherit");
+
+    // $('#myModal').modal('show');
+
+
+  
+}); 
+
+
+
+ $( document ).ready( function () {
+
+       $(".sub-menu").each(function(){
+    if($(this).children("li").length >= 10)
+      $(this).addClass("large_sub_menu");
+  }); 
+  }); 
+
+
+
+function withJquery(){
+  console.time('time1');
+  var temp = $("<input>");
+  $("body").append(temp);
+ temp.val($('#copyText1').text()).select();
+  document.execCommand("copy");
+  temp.remove();
+    console.timeEnd('time1');
+}
+
+
+
+
+
+$("marquee").hover(function () { 
+    this.stop();
+}, function () {
+    this.start();
+});
+
+
+
+
+
+
+function goBack() {
+  window.history.back();
+}
+
+function goForward() {
+  window.history.forward();
+}
+
+
+
+
+
+(function($) {
+    var size;
+  
+    //SMALLER HEADER WHEN SCROLL PAGE
+    function smallerMenu() {
+        var sc = $(window).scrollTop();
+        if (sc > 0) {
+            $('#header-sroll').addClass('small');
+        }else {
+            $('#header-sroll').removeClass('small');
+        }
+    }
+
+    // VERIFY WINDOW SIZE
+    function windowSize() {
+        size = $(document).width();
+        if (size >= 991) {
+            $('body').removeClass('open-menu');
+            $('.hamburger-menu .bar').removeClass('animate');
+        }
+    };
+
+     // ESC BUTTON ACTION
+    $(document).keyup(function(e) {
+        if (e.keyCode == 27) {
+            $('.bar').removeClass('animate');
+            $('body').removeClass('open-menu');
+            $('header .desk-menu .menu-container .menu .menu-item-has-children a ul').each(function( index ) {
+                $(this).removeClass('open-sub');
+            });
+        }
+    });
+
+    $('#cd-primary-nav > li').hover(function() {
+        $whidt_item = $(this).width();
+        $whidt_item = $whidt_item-8;
+
+        $prevEl = $(this).prev('li');
+        $preWidth = $(this).prev('li').width();
+        var pos = $(this).position();
+        pos = pos.left+4;
+        $('header .desk-menu .menu-container .menu>li.line').css({
+            width:  $whidt_item,
+            left: pos,
+            opacity: 1
+        });
+    });
+
+     // ANIMATE HAMBURGER MENU
+    $('.hamburger-menu').on('click', function() {
+        $('.hamburger-menu .bar').toggleClass('animate');
+        if($('body').hasClass('open-menu')){
+            $('body').removeClass('open-menu');
+        }else{
+            $('body').toggleClass('open-menu');
+        }
+    });
+
+    $('header .desk-menu .menu-container .menu .menu-item-has-children ul').each(function(index) {
+        $(this).prepend('<li class="back"><a href="#">BACK</a></li>');
+    });
+
+    // RESPONSIVE MENU NAVIGATION
+    $('header .desk-menu .menu-container .menu .menu-item-has-children > a').on('click', function(e) {
+        e.preventDefault();
+        if(size <= 991){
+            $(this).next('ul').addClass('open-sub');
+        }
+    });
+
+    // CLICK FUNCTION BACK MENU RESPONSIVE
+    $('header .desk-menu .menu-container .menu .menu-item-has-children ul .back').on('click', function(e) {
+        e.preventDefault();
+        $(this).parent('ul').removeClass('open-sub');
+    });
+
+    $('body .over-menu').on('click', function() {
+        $('body').removeClass('open-menu');
+        $('.bar').removeClass('animate');
+    });
+
+    $(document).ready(function(){
+        windowSize();
+    });
+
+    $(window).scroll(function(){
+        smallerMenu();
+    });
+
+    $(window).resize(function(){
+        windowSize();
+    });
+
+})(jQuery);
+
+
+
+$(document).ready(function() {
+
+
+var owl = $('.owl-verticles').owlCarousel({
+    loop: true,
+    margin: 50,
+    nav: true,
+    autoplay: false,
+    autoplayTimeout: 2000, // Adjust the autoplay speed if needed
+    responsiveClass: true,
+    responsive: {
+        0: {
+            items: 1,          // 1 item on very small screens (mobile)
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        480: {
+            items: 2,          // 2 items on small mobile screens
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        768: {
+            items: 3,          // 3 items on tablets
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1000: {
+            items: 4,          // 4 items on small laptops and up
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1200: {
+            items: 4,          // 5 items on larger laptops and desktops
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        }
+    }
+  });
+
+var isPlaying = false;
+
+  $('#playStopButton').on('click', function() {
+    if (isPlaying) {
+      owl.trigger('stop.owl.autoplay');
+      this.innerHTML = '<span>Play</span>';
+      $(this).removeClass('stop').addClass('play');
+    } else {
+      owl.trigger('play.owl.autoplay', [3000]); // Restart autoplay with timeout
+      this.innerHTML = '<span>Stop</span>';
+      $(this).removeClass('play').addClass('stop');
+    }
+    isPlaying = !isPlaying;
+  });
+var owl_op = $('.owl-policies').owlCarousel({
+    loop: true,
+    margin: 10,
+    nav: true,
+    autoplay: false,
+    autoplayTimeout: 2000, // Adjust the autoplay speed if needed
+    responsiveClass: true,
+     responsive: {
+        0: {
+            items: 1,          // 1 item on very small screens (mobile)
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        480: {
+            items: 2,          // 2 items on small mobile screens
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        768: {
+            items: 3,          // 3 items on tablets
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1000: {
+            items: 4,          // 4 items on small laptops and up
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1200: {
+            items: 4,          // 5 items on larger laptops and desktops
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        }
+    }
+  });
+
+var isPlaying_op = false;
+
+$('#playStopButton_op').on('click', function() {
+    if (isPlaying_op) {
+      owl_op.trigger('stop.owl.autoplay');
+      this.innerHTML = '<span>Play</span>';
+      $(this).removeClass('stop_op').addClass('play_op');
+    } else {
+      owl_op.trigger('play.owl.autoplay', [3000]); // Restart autoplay with timeout
+      this.innerHTML = '<span>Stop</span>';
+      $(this).removeClass('play_op').addClass('stop_op');
+    }
+    isPlaying_op = !isPlaying_op;
+});
+
+
+
+$('.owl-announcements').owlCarousel({
+    loop:true,
+    margin:10,
+      autoplay:true,
+    responsiveClass:true,
+    responsive: {
+        0: {
+            items: 1,          // 1 item on very small screens (mobile)
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        480: {
+            items: 1,          // 2 items on small mobile screens
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        768: {
+            items: 1,          // 3 items on tablets
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1000: {
+            items: 1,          // 4 items on small laptops and up
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1200: {
+            items: 1,          // 5 items on larger laptops and desktops
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        }
+    }
+});
+
+$('.owl-policy-home').owlCarousel({
+    loop:true,
+    margin:10,
+      autoplay:true,
+    responsiveClass:true,
+    responsive: {
+        0: {
+            items: 1,          // 1 item on very small screens (mobile)
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        480: {
+            items: 2,          // 2 items on small mobile screens
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        768: {
+            items: 3,          // 3 items on tablets
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1000: {
+            items: 4,          // 4 items on small laptops and up
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1200: {
+            items: 4,          // 5 items on larger laptops and desktops
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        }
+    }
+});
+$('.owl-from-blog').owlCarousel({
+    loop:true,
+    margin:10,
+      autoplay:false,
+    responsiveClass:true,
+    responsive: {
+        0: {
+            items: 1,          // 1 item on very small screens (mobile)
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        480: {
+            items: 2,          // 2 items on small mobile screens
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        768: {
+            items: 3,          // 3 items on tablets
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1000: {
+            items: 4,          // 4 items on small laptops and up
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1200: {
+            items: 4,          // 5 items on larger laptops and desktops
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        }
+    }
+});
+
+
+$('.owl-explore-start-up').owlCarousel({
+    loop:true,
+    margin:10,
+      autoplay:true,
+    responsiveClass:true,
+    responsive: {
+        0: {
+            items: 1,          // 1 item on very small screens (mobile)
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        480: {
+            items: 2,          // 2 items on small mobile screens
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        768: {
+            items: 3,          // 3 items on tablets
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1000: {
+            items: 3,          // 4 items on small laptops and up
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        },
+        1200: {
+            items: 3,          // 5 items on larger laptops and desktops
+            loop: true,        // Enable looping
+            lazyLoad: true,    // Enable lazy loading of images
+            nav: true          // Show navigation buttons
+        }
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+});
+
+
+
+
+
+
+
+
+
+
+
+function getLocation() {
+  if (navigator.geolocation) {
+    var position = navigator.geolocation.getCurrentPosition(showPosition);
+	alert(position.lattitude);
+  }
+}
+
+function showPosition(position) {
+  return position.coords
+}
+
+
+
+
+$(document).ready(function () {
+    // Initialize Owl Carousel
+    var owl = $('.owl-intro-slide').owlCarousel({
+        loop: true,
+        margin: 10,
+        nav: true,
+        autoplay: true, // Carousel plays by default
+        autoplayTimeout: 3000, // 3-second autoplay timeout
+        responsiveClass: true,
+        smartSpeed: 1500, // Smooth transition
+        responsive: {
+            0: {
+                items: 1,
+                nav: true,
+            },
+            600: {
+                items: 2,
+                nav: true,
+            },
+            1000: {
+                items: 4,
+                nav: true,
+            }
+        }
+    });
+
+    // Play/Pause functionality
+    var isPlaying = true;
+
+    $('#playStopButton_kiadb').on('click', function () {
+        if (isPlaying) {
+            owl.trigger('stop.owl.autoplay'); // Stop autoplay
+            this.innerHTML = '<span>Play</span>'; // Update button text
+            $(this).removeClass('pause').addClass('play'); // Update button class
+        } else {
+            owl.trigger('play.owl.autoplay', [3000]); // Start autoplay with 3-second timeout
+            this.innerHTML = '<span>Pause</span>'; // Update button text
+            $(this).removeClass('play').addClass('pause'); // Update button class
+        }
+        isPlaying = !isPlaying; // Toggle play/pause state
+    });
+	
+	
+	
+
+
+var owl_link = $('.owl-links').owlCarousel({
+    loop: true,
+    margin: 10,
+    nav: true,
+    autoplay: true,  // Carousel plays by default
+    autoplayTimeout: 3000,  // 3-second autoplay timeout
+    autoplayHoverPause: true,  // Pause autoplay on hover
+    smartSpeed: 1500,  // Smooth transition
+    responsiveClass: true,
+    responsive: {
+        0: {
+            items: 1,
+            nav: true,
+        },
+        600: {
+            items: 2,
+            nav: true,
+        },
+        1000: {
+            items: 4,
+            nav: true,
+        }
+    },
+    // This will make the scroll appear continuous by not resetting the scroll position
+    autoplaySpeed: 1000,  // Speed of transition between items, set as needed
+});
+
+// To achieve continuous scrolling effect
+setInterval(function() {
+    owl_link.trigger('next.owl_link.carousel');
+}, 3000);  // Adjust interval to your autoplayTimeout value
+
+// Optional: If you want to pause autoplay manually (hover-based pause is built-in with autoplayHoverPause)
+$('.owl_link-links').hover(
+    function() {
+        owl_link.trigger('stop.owl_link.autoplay');  // Pause autoplay on hover
+    },
+    function() {
+        owl_link.trigger('play.owl_link.autoplay');  // Resume autoplay on hover leave
+    }
+);
+
+
+});
+
+$(document).ready(function(){
+	
+
+
+
+	
+	
+	
+
+	
+	
+$(function(){
+    $('.nav li ').hover(function() {
+        $(this).addClass('open');
+    },
+    function() {
+        $(this).removeClass('open');
+    });
+});
+
+//Audio and Video forcing single play at a Time #START
+$('video').on('play', function(){
+	$('video').not(this).each(function(){
+		//$(this).trigger('pause');
+		this.pause();
+	});	
+});
+$('audio').on('play', function(){
+	$('audio').not(this).each(function(){
+		//$(this).trigger('pause');
+		this.pause();
+	});	
+});
+//Audio and Video forcing single play at a Time #END
+
+$("a[href^=http]").click(function(){
+      // NEW - excluded domains list
+      var excludes = [
+         "gov.in",
+		 "nic.in",
+		 "kannadasahithyaparishattu.in"
+      ];
+      for(i=0; i<excludes.length; i++) {
+         if(this.href.indexOf(excludes[i]) != -1) {
+            return true; // continue each() with next link
+         }
+      }
+      if(this.href.indexOf(location.hostname) == -1) {
+			var is_confirm = confirm("You are above to proceed to an external website. The "+base_url+" doesn't have control over the content of this site. Click OK to proceed.");
+			if(!is_confirm)
+				return false;
+			else
+				return true;
+      }
+});
+
+$("a[href^=http]").each(function(){
+      // NEW - excluded domains list
+      var excludes = [
+         
+      ];
+      for(i=0; i<excludes.length; i++) {
+         if(this.href.indexOf(excludes[i]) != -1) {
+            return true; // continue each() with next link
+         }
+      }
+      if(this.href.indexOf(location.hostname) == -1 || this.href.indexOf(".pdf") != -1) {
+           $(this).attr({
+               target: "_blank",
+               title: "Opens in a new window"
+           });
+      }
+});
+
+
+
+});
+
+
+           
