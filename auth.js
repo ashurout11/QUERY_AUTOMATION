@@ -22,7 +22,10 @@ const config = {
   questionSource: process.env.KNOI_QUESTION_SOURCE || 'live',
   dryRun: false,
   imageOutputDir: process.env.IMAGE_OUTPUT_DIR || path.join(process.cwd(), 'knoi-smart-questions-images'),
-  questionDelayMs: Number(process.env.QUESTION_DELAY_MS || 1500),
+  enableImageCapture:
+    String(process.env.ENABLE_IMAGE_CAPTURE ?? process.env.KNOI_ENABLE_IMAGE_CAPTURE ?? 'true').toLowerCase() !== 'false'
+    && String(process.env.ENABLE_IMAGE_CAPTURE ?? process.env.KNOI_ENABLE_IMAGE_CAPTURE ?? 'true').toLowerCase() !== '0',
+  questionDelayMs: Number(process.env.QUESTION_DELAY_MS || 250),
   questionLoadTimeoutMs: Number(process.env.QUESTION_LOAD_TIMEOUT_MS || 15000),
   answerWaitTimeoutMs: Number(process.env.KNOI_ANSWER_WAIT_TIMEOUT_MS || 300000),
   keepAwake: String(process.env.KNOI_KEEP_AWAKE || '').toLowerCase() !== 'false',
@@ -61,6 +64,12 @@ if (!config.questionSource || !['live', 'file'].includes(config.questionSource))
 config.dryRun = String(args['dry-run'] || args.dryRun || process.env.DRY_RUN || '').toLowerCase() === 'true'
   || String(args['dry-run'] || args.dryRun || process.env.DRY_RUN || '') === '1';
 config.imageOutputDir = args['image-dir'] || config.imageOutputDir;
+config.enableImageCapture = String(
+  args['enable-image-capture'] ?? args.enableImageCapture ?? process.env.ENABLE_IMAGE_CAPTURE ?? process.env.KNOI_ENABLE_IMAGE_CAPTURE ?? config.enableImageCapture
+).toLowerCase() !== 'false'
+  && String(
+    args['enable-image-capture'] ?? args.enableImageCapture ?? process.env.ENABLE_IMAGE_CAPTURE ?? process.env.KNOI_ENABLE_IMAGE_CAPTURE ?? config.enableImageCapture
+  ).toLowerCase() !== '0';
 config.keepAwake = String(args['keep-awake'] ?? args.keepAwake ?? process.env.KNOI_KEEP_AWAKE ?? config.keepAwake).toLowerCase() !== 'false'
   && String(args['keep-awake'] ?? args.keepAwake ?? process.env.KNOI_KEEP_AWAKE ?? config.keepAwake).toLowerCase() !== '0';
 config.resumeFromCheckpoint = String(args.resume ?? process.env.KNOI_RESUME ?? config.resumeFromCheckpoint).toLowerCase() !== 'false'
@@ -275,14 +284,29 @@ function isRecoverableSessionError(error) {
   ].some((needle) => message.includes(needle));
 }
 
-function isGenericUnavailableAnswer(text) {
-  const normalized = normalizeLabel(text);
+function isFailureAnswer(answerText) {
+  const normalized = normalizeLabel(answerText);
+  if (!normalized) return false;
+
   return [
+    'sorry',
+    'encountered an error',
+    'request timed out',
+    'please try again',
+    'something went wrong',
+    'failed to generate',
+    'network error',
+    'internal server error',
     'this information is not available in the document.',
     'this information is not available in the document',
     'information is not available in the document',
     'not available in the document',
   ].some((phrase) => normalized.includes(phrase));
+}
+
+function logQuestionProgress(questionNumber, totalQuestions, message, extra = '') {
+  const suffix = extra ? ` ${extra}` : '';
+  console.log(`[${questionNumber}/${totalQuestions}] ${message}${suffix}`);
 }
 
 function startKeepAwake() {
@@ -651,8 +675,7 @@ async function findSmartQuestionsPanelRoot(page) {
   return null;
 }
 
-async function collectLivePanelQuestions(page) {
-  const panel = await findSmartQuestionsPanelRoot(page);
+async function collectLivePanelQuestionsAtCurrentScroll(page, panel) {
   if (!panel) return [];
 
   const buttons = panel.locator('button');
@@ -681,6 +704,65 @@ async function collectLivePanelQuestions(page) {
   return uniqueByNormalizedText(questions);
 }
 
+async function getScrollableQuestionPanel(page) {
+  const panel = await findSmartQuestionsPanelRoot(page);
+  if (!panel) return null;
+
+  const scrollableRoot = panel.locator('xpath=ancestor-or-self::*[self::div or self::section or self::main][1]');
+  if (await scrollableRoot.count().catch(() => 0)) {
+    return scrollableRoot;
+  }
+
+  return panel;
+}
+
+async function collectLivePanelQuestions(page) {
+  const panel = await getScrollableQuestionPanel(page);
+  if (!panel) return [];
+
+  const collected = new Map();
+  let previousScrollTop = -1;
+  let stagnantPasses = 0;
+
+  for (let passIndex = 0; passIndex < 24; passIndex += 1) {
+    const current = await collectLivePanelQuestionsAtCurrentScroll(page, panel);
+    for (const item of current) {
+      const key = normalizeLabel(item.rawText || item.text);
+      if (!collected.has(key)) {
+        collected.set(key, item);
+      }
+    }
+
+    const panelState = await panel.evaluate((element) => ({
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    })).catch(() => null);
+
+    if (!panelState || panelState.scrollHeight <= panelState.clientHeight + 2) {
+      break;
+    }
+
+    if (panelState.scrollTop === previousScrollTop) {
+      stagnantPasses += 1;
+    } else {
+      stagnantPasses = 0;
+    }
+
+    if (stagnantPasses >= 2) {
+      break;
+    }
+
+    previousScrollTop = panelState.scrollTop;
+    await panel.evaluate((element) => {
+      element.scrollTop = Math.min(element.scrollTop + Math.max(160, Math.floor(element.clientHeight * 0.8)), element.scrollHeight);
+    }).catch(() => {});
+    await page.waitForTimeout(350);
+  }
+
+  return [...collected.values()].filter((item) => isQuestionLikeText(item.text));
+}
+
 function isLikelyVisibleBox(stats) {
   return stats && stats.visible && (stats.textLength > 0 || stats.imageCount > 0);
 }
@@ -697,6 +779,9 @@ const answerCandidateSelectors = [
   '[role="article"]',
   '[role="listitem"]',
   '[role="tabpanel"]',
+  'main div[dir="auto"]',
+  'main div',
+  'main p',
   'main article',
   'main section',
 ];
@@ -948,7 +1033,6 @@ async function snapshotAnswerCandidates(page) {
       const imageCount = await locator.locator('img').count().catch(() => 0);
       if (!text && !imageCount) continue;
       if (/^ask me anything about this document/i.test(text)) continue;
-      if (text.length < 8 && !imageCount) continue;
 
       const box = await locator.boundingBox().catch(() => null);
       if (box) {
@@ -978,74 +1062,85 @@ function answerSignature(candidate) {
   return `${candidate.text.slice(0, 160)}|${candidate.imageCount}`;
 }
 
-async function findBestAnswerCandidate(page, beforeSignatures = new Set()) {
+async function findBestAnswerCandidate(page, beforeSignatures = new Set(), questionAnchorBox = null, clickedQuestionText = '') {
   const candidates = await snapshotAnswerCandidates(page);
   if (!candidates.length) return null;
 
-  for (const selector of answerCandidateSelectors) {
-    const matchingCandidates = candidates.filter(
-      (candidate) => candidate.selector === selector && candidate.text && !beforeSignatures.has(answerSignature(candidate))
-    );
-    const newMatchingCandidates = matchingCandidates;
-    if (newMatchingCandidates.length) {
-      newMatchingCandidates.sort((left, right) => {
-        const scoreLeft = left.textLength + left.imageCount * 1000;
-        const scoreRight = right.textLength + right.imageCount * 1000;
-        return scoreRight - scoreLeft;
-      });
-      return newMatchingCandidates[0];
-    }
-  }
+  const viewport = page.viewportSize() || { width: 1440, height: 900 };
+  const anchorY = questionAnchorBox?.y ?? null;
+  const clickedText = normalizeLabel(clickedQuestionText);
 
-  candidates.sort((left, right) => {
-    const scoreLeft = left.textLength + left.imageCount * 1000;
-    const scoreRight = right.textLength + right.imageCount * 1000;
-    return scoreRight - scoreLeft;
+  const scoredCandidates = candidates.map((candidate) => {
+    const signature = answerSignature(candidate);
+    const isNew = !beforeSignatures.has(signature);
+    const normalizedText = normalizeLabel(candidate.text);
+    const questionOverlap = clickedText ? tokenOverlapRatio(normalizedText, clickedText) : 0;
+    const isQuestionBubble =
+      clickedText &&
+      (normalizedText === clickedText ||
+        normalizedText.includes(clickedText) ||
+        clickedText.includes(normalizedText) ||
+        questionOverlap > 0.7);
+    const isLeftSide = candidate.box ? candidate.box.x < viewport.width * 0.65 : true;
+    const isBelowQuestion = anchorY === null || !candidate.box ? true : candidate.box.y >= anchorY - 30;
+    const nearComposer = candidate.box ? candidate.box.y > viewport.height * 0.72 : false;
+
+    let score = candidate.textLength + candidate.imageCount * 1000;
+    if (isNew) score += 500;
+    if (isLeftSide) score += 150;
+    if (isBelowQuestion) score += 200;
+    if (questionOverlap > 0.3) score -= 500;
+    if (isQuestionBubble) score -= 1000;
+    if (nearComposer) score -= 250;
+    if (candidate.box && candidate.box.x > viewport.width * 0.78) score -= 400;
+    if (candidate.box && candidate.box.height > viewport.height * 0.6) score -= 300;
+
+    return {
+      ...candidate,
+      score,
+      isNew,
+      isQuestionBubble,
+    };
   });
 
-  return candidates[0];
+  scoredCandidates.sort((left, right) => right.score - left.score || right.textLength - left.textLength);
+
+  const bestNew = scoredCandidates.find((candidate) => candidate.isNew && candidate.text && !candidate.isQuestionBubble);
+  if (bestNew) return bestNew;
+
+  return scoredCandidates.find((candidate) => candidate.text && !candidate.isQuestionBubble) || null;
 }
 
 async function captureAnswerForQuestion(page, questionRef, outputBaseName) {
   const questionText = String(questionRef?.question ?? questionRef?.text ?? questionRef ?? '');
   const retryLimit = 2;
   for (let attempt = 1; attempt <= retryLimit; attempt += 1) {
+    await page.bringToFront().catch(() => {});
     const beforeCandidates = await snapshotAnswerCandidates(page);
     const beforeSignatures = new Set(beforeCandidates.map(answerSignature));
 
     await openSmartQuestionPanel(page).catch(() => {});
     const clickedQuestion = await clickSmartQuestion(page, questionRef);
+    const clickedQuestionBox = await clickedQuestion.locator.boundingBox().catch(() => null);
+    const retryCount = attempt - 1;
     console.log(`Clicked: ${clickedQuestion.clickedText}`);
-    console.log('Waiting for answer generation...');
-    await page.waitForTimeout(1000);
-    await page.getByText(/analyzing document/i).first().waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(200);
 
     const deadline = Date.now() + config.answerWaitTimeoutMs;
-    let seenAnalyzingState = false;
     while (Date.now() < deadline) {
-      const analyzingVisible = await page.getByText(/analyzing document/i).first().isVisible().catch(() => false);
-      if (analyzingVisible) {
-        seenAnalyzingState = true;
-      }
-
-      const bestCandidate = await findBestAnswerCandidate(page, beforeSignatures);
+      const bestCandidate = await findBestAnswerCandidate(
+        page,
+        beforeSignatures,
+        clickedQuestionBox,
+        clickedQuestion.clickedText
+      );
       if (!bestCandidate) {
-        await page.waitForTimeout(750);
+        await page.waitForTimeout(250);
         continue;
       }
 
       const answerContainer = page.locator(bestCandidate.selector).nth(bestCandidate.index);
       const answerText = (await answerContainer.innerText().catch(() => '')).trim();
-
-      if (isGenericUnavailableAnswer(answerText)) {
-        console.log('Captured unavailable-answer fallback.');
-        const imageFiles = await saveAnswerImages(answerContainer, outputBaseName);
-        return {
-          answerText,
-          imageFiles,
-          status: 'ok',
-        };
-      }
 
       const signature = answerSignature(bestCandidate);
       const normalizedBest = normalizeLabel(bestCandidate.text);
@@ -1059,43 +1154,51 @@ async function captureAnswerForQuestion(page, questionRef, outputBaseName) {
 
       const viewport = page.viewportSize() || { width: 1440, height: 900 };
       const isLikelyAnswerSide = bestCandidate.box ? bestCandidate.box.x < viewport.width * 0.62 : true;
-      const hasEnoughContent = bestCandidate.textLength >= 20 || bestCandidate.imageCount > 0;
-      const errorText = normalizeLabel(answerText);
       const answerLooksValid =
         answerText &&
         !looksLikeQuestionBubble &&
         isLikelyAnswerSide &&
-        hasEnoughContent &&
         !/^smart questions$/i.test(answerText) &&
-        !/^analyzing document$/i.test(answerText);
+        !/^analyzing document$/i.test(answerText) &&
+        !isFailureAnswer(answerText);
 
       if (
         answerLooksValid &&
         !beforeSignatures.has(signature)
       ) {
-        if (
-          errorText.includes('request timed out') &&
-          errorText.includes('please try again') &&
-          attempt < retryLimit
-        ) {
-          console.log(`Retrying question after timeout error (attempt ${attempt + 1}/${retryLimit})...`);
-          break;
-        }
-
+        const imageFiles = config.enableImageCapture
+          ? await saveAnswerImages(answerContainer, outputBaseName)
+          : [];
         console.log('Answer captured.');
-        const imageFiles = await saveAnswerImages(answerContainer, outputBaseName);
         return {
           answerText,
           imageFiles,
           status: 'ok',
+          retryCount,
         };
       }
 
-      await page.waitForTimeout(750);
+      if (isFailureAnswer(answerText)) {
+        console.log(`Failure answer detected on attempt ${attempt}/${retryLimit}.`);
+        if (attempt < retryLimit) {
+          console.log(`Retrying question once for: ${questionText}`);
+          break;
+        }
+
+        return {
+          answerText,
+          imageFiles: [],
+          status: 'skipped',
+          errorMessage: answerText,
+          retryCount,
+        };
+      }
+
+      await page.waitForTimeout(250);
     }
 
     if (attempt < retryLimit) {
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(250);
       continue;
     }
 
@@ -1104,6 +1207,7 @@ async function captureAnswerForQuestion(page, questionRef, outputBaseName) {
       answerText: '',
       imageFiles: [],
       status: 'timeout',
+      retryCount: retryCount,
     };
   }
 
@@ -1111,6 +1215,7 @@ async function captureAnswerForQuestion(page, questionRef, outputBaseName) {
     answerText: '',
     imageFiles: [],
     status: 'timeout',
+    retryCount: 1,
   };
 }
 
@@ -1158,6 +1263,10 @@ async function extractLiveSmartQuestions(page) {
 }
 
 async function saveAnswerImages(answerContainer, outputBaseName) {
+  if (!config.enableImageCapture) {
+    return [];
+  }
+
   const imageLocators = answerContainer.locator('img');
   const imageCount = await imageLocators.count().catch(() => 0);
   if (!imageCount) return [];
@@ -1404,6 +1513,10 @@ async function createBrowserSession() {
     `--remote-debugging-port=${config.remoteDebuggingPort}`,
     `--user-data-dir=${config.chromeUserDataDir}`,
     `--profile-directory=${config.chromeProfileName}`,
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-background-networking',
     '--new-window',
     '--no-first-run',
     '--no-default-browser-check',
@@ -1479,7 +1592,7 @@ async function run() {
       if (!questions.length) {
         throw new Error(`No questions found from ${config.questionCsvPath} starting at line ${config.questionStartLine}`);
       }
-      console.log(`Loaded ${questions.length} questions from file mode`);
+      console.log(`Question loaded: ${questions.length} questions from file mode`);
       console.log(`Questions file: ${config.questionCsvPath}`);
     } else {
       try {
@@ -1490,7 +1603,7 @@ async function run() {
         await dumpDebug(page, 'smart-question-panel-failure');
         throw error;
       }
-      console.log(`Loaded ${questions.length} live Smart Questions from the page`);
+      console.log(`Question loaded: ${questions.length} live Smart Questions from the page`);
     }
 
     const pageTitle = await page.title().catch(() => '');
@@ -1532,7 +1645,10 @@ async function run() {
       const question = questions[index];
       const questionIndex = index + 1;
       const outputBaseName = buildOutputBaseName(config.outputPrefix, questionIndex);
-      console.log(`Submitting question ${questionIndex}: ${question.question}`);
+      await page.bringToFront().catch(() => {});
+      logQuestionProgress(questionIndex, questions.length, 'Question Loaded');
+      logQuestionProgress(questionIndex, questions.length, `Question Text: ${question.question}`);
+      logQuestionProgress(questionIndex, questions.length, 'Processing...', 'Retry 0/1');
       let captured;
       try {
         captured = await captureAnswerForQuestion(page, question, outputBaseName);
@@ -1565,6 +1681,7 @@ async function run() {
               imageFiles: [],
               status: 'error',
               errorMessage: retryError.message,
+              retryCount: 0,
             };
           });
         } else {
@@ -1574,6 +1691,7 @@ async function run() {
             imageFiles: [],
             status: 'error',
             errorMessage: error.message,
+            retryCount: 0,
           };
         }
       }
@@ -1587,9 +1705,22 @@ async function run() {
         questionIndex,
         status: captured.status || 'ok',
         errorMessage: captured.errorMessage || '',
+        retryCount: captured.retryCount ?? 0,
       };
       results.push(row);
+      if (captured.status === 'ok') {
+        logQuestionProgress(questionIndex, questions.length, 'Answer Captured', `Retry ${captured.retryCount ?? 0}/1`);
+        logQuestionProgress(questionIndex, questions.length, 'Saved');
+      } else if (captured.status === 'timeout') {
+        logQuestionProgress(questionIndex, questions.length, 'Timeout', `Retry ${captured.retryCount ?? 0}/1`);
+      } else if (captured.status === 'skipped') {
+        logQuestionProgress(questionIndex, questions.length, 'Skipped', `Retry ${captured.retryCount ?? 0}/1`);
+      } else {
+        logQuestionProgress(questionIndex, questions.length, `Status: ${captured.status || 'error'}`, `Retry ${captured.retryCount ?? 0}/1`);
+      }
+      logQuestionProgress(questionIndex, questions.length, 'Completed');
       console.log(JSON.stringify(row, null, 2));
+      console.log(`Moving to next question after question ${questionIndex}.`);
       await saveRunCheckpoint(checkpointPath, {
         createdAt: checkpoint?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
