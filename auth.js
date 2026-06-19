@@ -1111,6 +1111,71 @@ async function findBestAnswerCandidate(page, beforeSignatures = new Set(), quest
   return scoredCandidates.find((candidate) => candidate.text && !candidate.isQuestionBubble) || null;
 }
 
+async function findDirectVisibleAnswerCandidate(page, clickedQuestionText = '') {
+  const selectors = [
+    '[data-message-role="assistant"]',
+    '[data-role="assistant"]',
+    '[data-testid*="assistant" i]',
+    '[aria-label*="assistant" i]',
+    '[class*="assistant" i]',
+    '[class*="answer" i]',
+    'main [role="article"]',
+    'main [role="listitem"]',
+    'main [role="tabpanel"]',
+    'main div[dir="auto"]',
+    'main p',
+  ];
+
+  const viewport = page.viewportSize() || { width: 1440, height: 900 };
+  const normalizedClicked = normalizeLabel(clickedQuestionText);
+  const candidates = [];
+
+  for (const selector of selectors) {
+    const locators = page.locator(selector);
+    const count = await locators.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const locator = locators.nth(index);
+      if (!(await locator.isVisible().catch(() => false))) continue;
+
+      const tagName = await locator.evaluate((element) => element.tagName.toLowerCase()).catch(() => '');
+      if (['textarea', 'input', 'select', 'option', 'button'].includes(tagName)) continue;
+      if (await locator.evaluate((element) => element.matches('[contenteditable="true"]')).catch(() => false)) continue;
+
+      const text = (await locator.innerText().catch(() => '')).trim().replace(/\s+/g, ' ');
+      const imageCount = await locator.locator('img').count().catch(() => 0);
+      if (!text && !imageCount) continue;
+      if (/^ask me anything about this document/i.test(text)) continue;
+      if (/^analyzing document/i.test(text)) continue;
+
+      const normalizedText = normalizeLabel(text);
+      const overlapWithClicked = tokenOverlapRatio(normalizedText, normalizedClicked);
+      const looksLikeQuestionBubble =
+        normalizedClicked &&
+        (normalizedText === normalizedClicked ||
+          normalizedText.includes(normalizedClicked) ||
+          normalizedClicked.includes(normalizedText) ||
+          overlapWithClicked > 0.7);
+      if (looksLikeQuestionBubble) continue;
+
+      const box = await locator.boundingBox().catch(() => null);
+      if (box && box.x > viewport.width * 0.82 && !imageCount) continue;
+
+      candidates.push({
+        selector,
+        index,
+        locator,
+        text,
+        textLength: text.length,
+        imageCount,
+        box,
+      });
+    }
+  }
+
+  candidates.sort((left, right) => right.textLength - left.textLength || left.box?.y - right.box?.y || left.box?.x - right.box?.x);
+  return candidates[0] || null;
+}
+
 async function captureAnswerForQuestion(page, questionRef, outputBaseName) {
   const questionText = String(questionRef?.question ?? questionRef?.text ?? questionRef ?? '');
   const retryLimit = 2;
@@ -1128,6 +1193,37 @@ async function captureAnswerForQuestion(page, questionRef, outputBaseName) {
 
     const deadline = Date.now() + config.answerWaitTimeoutMs;
     while (Date.now() < deadline) {
+      const directVisibleAnswer = await findDirectVisibleAnswerCandidate(page, clickedQuestion.clickedText).catch(() => null);
+      if (directVisibleAnswer) {
+        const directAnswerText = (await directVisibleAnswer.locator.innerText().catch(() => '')).trim();
+        if (isFailureAnswer(directAnswerText)) {
+          console.log(`Failure answer detected on attempt ${attempt}/${retryLimit}.`);
+          if (attempt < retryLimit) {
+            console.log(`Retrying question once for: ${questionText}`);
+            break;
+          }
+
+          return {
+            answerText: directAnswerText,
+            imageFiles: [],
+            status: 'skipped',
+            errorMessage: directAnswerText,
+            retryCount,
+          };
+        }
+
+        console.log('Answer captured.');
+        const imageFiles = config.enableImageCapture
+          ? await saveAnswerImages(directVisibleAnswer.locator, outputBaseName)
+          : [];
+        return {
+          answerText: directAnswerText,
+          imageFiles,
+          status: 'ok',
+          retryCount,
+        };
+      }
+
       const bestCandidate = await findBestAnswerCandidate(
         page,
         beforeSignatures,
